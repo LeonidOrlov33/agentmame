@@ -1026,7 +1026,20 @@ def current_key():
 
 def main(argv):
     global CLI_KEY
-    host, port = "127.0.0.1", 8765
+    # консоль хостинга/Windows может быть в cp1251 — принудительно UTF-8, иначе баннер падает
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    except Exception:
+        pass
+    # Render/Heroku и подобные хостинги передают порт в $PORT и требуют 0.0.0.0
+    env_port = os.environ.get("PORT", "").strip()
+    env_host = os.environ.get("HOST", "").strip()
+    if env_port:
+        host = env_host or "0.0.0.0"
+        port = int(env_port)
+    else:
+        host, port = env_host or "127.0.0.1", 8765
     args = list(argv[1:])
     i = 0
     while i < len(args):
