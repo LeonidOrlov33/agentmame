@@ -41,8 +41,8 @@ background:radial-gradient(1100px 800px at 12% -8%,#1c2848 0%,rgba(28,40,72,0) 6
 .filechip button:hover{color:var(--err)}
 .field{display:block;margin-top:13px}
 .field>span{display:block;font-size:10.5px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:#8b9ab8;margin-bottom:6px}
-select,textarea{width:100%;background:rgba(255,255,255,.055);color:var(--txt);border:1px solid var(--line2);border-radius:11px;padding:10px 11px;font-family:inherit;font-size:13px;outline:none;transition:.16s}
-select:focus,textarea:focus{border-color:rgba(122,162,255,.8);box-shadow:0 0 0 3px rgba(122,162,255,.16)}
+select,textarea,input[type=password],input[type=text]{width:100%;background:rgba(255,255,255,.055);color:var(--txt);border:1px solid var(--line2);border-radius:11px;padding:10px 11px;font-family:inherit;font-size:13px;outline:none;transition:.16s}
+select:focus,textarea:focus,input[type=password]:focus,input[type=text]:focus{border-color:rgba(122,162,255,.8);box-shadow:0 0 0 3px rgba(122,162,255,.16)}
 select option{background:#141a2c;color:#e8eefb}
 textarea{resize:vertical;min-height:78px;line-height:1.5}
 .switch{display:flex;align-items:center;gap:9px;margin-top:12px;font-size:12.3px;color:#b9c6e0;cursor:pointer;user-select:none}
@@ -100,6 +100,11 @@ mark.hl.w sup.badge{background:#b8860b}
 .scoremeta{min-width:0}
 .scoremeta .sm1{font-size:13px;font-weight:800;margin-bottom:4px;line-height:1.35}
 .scoremeta .sm2{font-size:11.5px;color:var(--dim);line-height:1.5}
+.scoremeta .sm3{font-size:10px;letter-spacing:.4px;text-transform:uppercase;font-weight:800;color:#7f8dab;margin-top:5px}
+.kind{font-size:9px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;padding:2px 6px;border-radius:99px;flex:none}
+.kind.typo{background:rgba(255,84,112,.28);color:#ffc3cd}
+.kind.error{background:rgba(255,120,80,.24);color:#ffcbae}
+.kind.flaw{background:rgba(255,200,87,.22);color:#ffdf9a}
 .counts{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .cnt{border-radius:12px;padding:10px 12px;border:1px solid}
 .cnt .n{font-size:21px;font-weight:900;line-height:1.05}
@@ -145,6 +150,11 @@ mark.hl.w sup.badge{background:#b8860b}
 .tip .te{font-size:12.4px;line-height:1.55;color:#b7c4dc;margin-bottom:8px}
 .tip .ts{font-size:12.4px;line-height:1.55;color:#9be8bb}
 .tip .ts b{color:#6fe0a0}
+.tip .tf{font-size:12.4px;line-height:1.55;color:#9be8bb;margin-bottom:8px}
+.tip .tf b{color:#6fe0a0}
+.tip .tq b{color:#dbe6ff}
+.tip .te b{color:#dbe6ff}
+.tip .conf{margin-left:auto;font-size:10px;font-weight:900;color:#8fa0c0;letter-spacing:.4px}
 .tip .src{margin-top:9px;font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:#6d7c99;font-weight:800}
 @media (max-width:1200px){.layout{grid-template-columns:290px minmax(0,1fr)}.panel.right{display:none}}
 @media (max-width:880px){.layout{grid-template-columns:1fr;padding:0 10px 10px}.panel.right{display:flex}.brand .t2{display:none}.paper{padding:26px 22px 30px;font-size:15.5px}}
@@ -188,6 +198,11 @@ mark.hl.w sup.badge{background:#b8860b}
       <label class='field'>
         <span>Модель Groq</span>
         <select id='modelSel'></select>
+      </label>
+
+      <label class='field'>
+        <span>Профиль проверки</span>
+        <select id='profileSel'></select>
       </label>
 
       <label class='switch'>
@@ -527,7 +542,7 @@ var el = {
   statusChip: $('statusChip'), statusText: $('statusText'),
   dropzone: $('dropzone'), fileInput: $('fileInput'), fileChip: $('fileChip'),
   fileName: $('fileName'), fileClear: $('fileClear'),
-  modelSel: $('modelSel'), localOnly: $('localOnly'),
+  modelSel: $('modelSel'), profileSel: $('profileSel'), localOnly: $('localOnly'),
   checkBtn: $('checkBtn'), textIn: $('textIn'), textBtn: $('textBtn'),
   progressWrap: $('progressWrap'), progFill: $('progFill'), progStage: $('progStage'),
   docScroll: $('docScroll'), emptyState: $('emptyState'), docHead: $('docHead'),
@@ -540,7 +555,9 @@ var el = {
 /* ---------- здоровье сервера ---------- */
 function loadHealth(){
   fetch('/api/health', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
-    if (j.has_key){
+    state.serverHasKey = !!j.has_key;
+    var hasKey = state.serverHasKey;
+    if (hasKey){
       el.statusChip.className = 'chip ok';
       el.statusText.textContent = 'Groq подключён' + (j.key_hint ? ' · ' + j.key_hint : '');
     } else {
@@ -564,9 +581,27 @@ function loadHealth(){
       el.modelSel.appendChild(o2);
     }
 
-    if (!j.has_key){
+    el.profileSel.innerHTML = '';
+    var profiles = j.profiles || [];
+    profiles.forEach(function(p){
+      var o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.label;
+      if (p.id === j.default_profile) o.selected = true;
+      el.profileSel.appendChild(o);
+    });
+    if (!profiles.length){
+      var p2 = document.createElement('option');
+      p2.value = 'economy';
+      p2.textContent = 'Экономика (ВКР) + нормоконтроль';
+      el.profileSel.appendChild(p2);
+    }
+
+    if (!hasKey){
       el.localOnly.checked = true;
-      addNote('Ключ Groq не задан, работает локальный нормоконтроль. Чтобы включить нейросеть, задайте переменную окружения GROQ_API_KEY или создайте файл groq_key.txt рядом с server.py.');
+      addNote('Ключ Groq не задан, работает локальный нормоконтроль. Чтобы включить нейросеть, задайте ключ на сервере: переменная окружения GROQ_API_KEY или запуск python server.py --key gsk_… — и обновите страницу.');
+    } else {
+      el.localOnly.checked = false;
     }
   }).catch(function(){
     el.statusChip.className = 'chip bad';
@@ -660,14 +695,17 @@ function sendFile(blob, name){
 
   blob.arrayBuffer().then(function(buf){
     var mode = el.localOnly.checked ? 'local' : 'ai';
+    if (mode === 'ai' && !state.serverHasKey) mode = 'local';
+    var headers = {
+      'Content-Type': 'application/octet-stream',
+      'X-Filename-B64': b64utf8(name || 'document.txt'),
+      'X-Mode': mode,
+      'X-Model': el.modelSel.value || 'llama-3.3-70b-versatile',
+      'X-Profile': (el.profileSel && el.profileSel.value) || 'economy'
+    };
     return fetch('/api/check', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-Filename-B64': b64utf8(name || 'document.txt'),
-        'X-Mode': mode,
-        'X-Model': el.modelSel.value || 'llama-3.3-70b-versatile'
-      },
+      headers: headers,
       body: buf
     });
   }).then(function(r){ return r.json(); }).then(function(j){
@@ -794,9 +832,13 @@ function render(r){
   el.cntErr.textContent = r.errors;
   el.cntWarn.textContent = r.warnings;
 
+  var grade = r.grade || {};
+  var mark = grade.mark || r.mark || '';
   el.scoreMeta.innerHTML =
-    '<div class="sm1">' + (r.mode === 'ai' ? 'Нейросеть Groq' : 'Локальный нормоконтроль') + '</div>' +
-    '<div class="sm2">' + esc(r.summary || '') + '</div>';
+    '<div class="sm1">' + (mark ? esc(mark) : (r.mode === 'ai' ? 'Нейросеть Groq' : 'Локальный нормоконтроль')) + '</div>' +
+    '<div class="sm2">' + esc(r.summary || grade.comment || '') + '</div>' +
+    '<div class="sm3">' + (r.mode === 'ai' ? 'движок: Groq' : 'движок: локальные правила') +
+      (typeof r.typos === 'number' && r.typos ? ' · опечаток: ' + r.typos : '') + '</div>';
 
   renderChart(r.chart || []);
   renderList();
@@ -870,10 +912,13 @@ function renderList(){
 
   el.issuesList.innerHTML = list.map(function(it){
     var cls = it.severity === 'error' ? 'e' : 'w';
+    var kind = it.kind || (it.severity === 'error' ? 'error' : 'flaw');
+    var kindLabel = kind === 'typo' ? 'опечатка' : kind === 'error' ? 'ошибка' : 'недочёт';
     var expl = String(it.explanation || '');
     if (expl.length > 130) expl = expl.slice(0, 130) + '…';
     return '<div class="issue ' + cls + '" data-id="' + it.id + '">' +
       '<div class="ih"><span class="badge">' + it.id + '</span>' +
+      '<span class="kind ' + kind + '">' + kindLabel + '</span>' +
       '<span class="it">' + esc(it.title) + '</span></div>' +
       '<div class="iq">' + esc(it.category) + '</div>' +
       '<div class="ix">' + esc(expl) + '</div>' +
@@ -927,16 +972,22 @@ function showTip(mark){
   if (!it) return;
 
   clearTimeout(tipTimer);
-  var isErr = it.severity === 'error';
+  var kind = it.kind || (it.severity === 'error' ? 'error' : 'flaw');
+  var kindLabel = kind === 'typo' ? 'опечатка' : kind === 'error' ? 'ошибка' : 'недочёт';
+  var sevCls = it.severity === 'error' ? 'e' : 'w';
+  var found = it.found || it.quote || '';
+  var should = it.should_be || '';
 
   el.tip.innerHTML =
     '<div class="th">' +
-      '<span class="sev ' + (isErr ? 'e' : 'w') + '">' + (isErr ? 'ошибка' : 'недочёт') + '</span>' +
+      '<span class="sev ' + sevCls + '">' + kindLabel + '</span>' +
       '<span class="cat">' + esc(it.category) + '</span>' +
+      (it.confidence != null && it.confidence !== '' ? '<span class="conf">' + Math.round(Number(it.confidence) * 100) + '%</span>' : '') +
     '</div>' +
     '<div class="tt">' + esc(it.title) + '</div>' +
-    (it.quote ? '<div class="tq">«' + esc(it.quote) + '»</div>' : '') +
-    (it.explanation ? '<div class="te">' + esc(it.explanation) + '</div>' : '') +
+    (found ? '<div class="tq"><b>Найдено:</b> «' + esc(found) + '»</div>' : '') +
+    (should ? '<div class="tf"><b>Правильно:</b> «' + esc(should) + '»</div>' : '') +
+    (it.explanation ? '<div class="te"><b>Почему:</b> ' + esc(it.explanation) + '</div>' : '') +
     (it.suggestion ? '<div class="ts"><b>Как исправить:</b> ' + esc(it.suggestion) + '</div>' : '') +
     '<div class="src">' + (it.source === 'ai' ? 'нашла нейросеть Groq' : 'локальный нормоконтроль') + '</div>';
 
