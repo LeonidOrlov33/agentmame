@@ -111,6 +111,12 @@ mark.hl.w sup.badge{background:#b8860b}
 .cnt .l{font-size:10px;letter-spacing:.6px;text-transform:uppercase;font-weight:800;opacity:.85}
 .cnt.err{background:rgba(255,84,112,.12);border-color:rgba(255,84,112,.4);color:#ffa7b6}
 .cnt.warn{background:rgba(255,200,87,.1);border-color:rgba(255,200,87,.38);color:#ffd985}
+.dlrow{display:flex;gap:8px;margin-top:12px}
+.dlrow[hidden]{display:none}
+.dlrow button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit;font-size:11.5px;font-weight:800;cursor:pointer;padding:9px 10px;border-radius:10px;border:1px solid rgba(122,162,255,.45);background:rgba(122,162,255,.16);color:#dbe6ff;transition:.15s}
+.dlrow button:hover{background:rgba(122,162,255,.3);border-color:rgba(122,162,255,.8);transform:translateY(-1px)}
+.dlrow button:active{transform:none}
+.dlrow .ic{font-size:13px;line-height:1}
 .chartwrap{margin:16px 0 4px;display:flex;flex-direction:column;gap:10px}
 .crow .cl{display:flex;justify-content:space-between;font-size:11.5px;color:#b9c6e0;margin-bottom:4px;gap:8px}
 .crow .cl b{color:#e8eefb;font-weight:800}
@@ -258,6 +264,11 @@ mark.hl.w sup.badge{background:#b8860b}
       <div class='counts'>
         <div class='cnt err'><div class='n' id='cntErr'>0</div><div class='l'>ошибки</div></div>
         <div class='cnt warn'><div class='n' id='cntWarn'>0</div><div class='l'>недочёты</div></div>
+      </div>
+
+      <div class='dlrow' id='dlRow' hidden>
+        <button id='dlTxt' title='Скачать отчёт с объяснениями всех замечаний (TXT)'><span class='ic'>⬇</span> Отчёт TXT</button>
+        <button id='dlCsv' title='Скачать таблицу замечаний для Excel (CSV)'><span class='ic'>📊</span> Таблица CSV</button>
       </div>
 
       <div class='chartwrap' id='chartWrap'>
@@ -549,13 +560,15 @@ var el = {
   ring: $('ring'), scoreVal: $('scoreVal'), scoreMeta: $('scoreMeta'),
   cntErr: $('cntErr'), cntWarn: $('cntWarn'),
   chartWrap: $('chartWrap'), filters: $('filters'), issuesList: $('issuesList'),
-  notesWrap: $('notesWrap'), tip: $('tip')
+  notesWrap: $('notesWrap'), tip: $('tip'),
+  dlRow: $('dlRow'), dlTxt: $('dlTxt'), dlCsv: $('dlCsv')
 };
 
 /* ---------- здоровье сервера ---------- */
 function loadHealth(){
   fetch('/api/health', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
     state.serverHasKey = !!j.has_key;
+    state.profiles = j.profiles || [];
     var hasKey = state.serverHasKey;
     if (hasKey){
       el.statusChip.className = 'chip ok';
@@ -843,6 +856,7 @@ function render(r){
   renderChart(r.chart || []);
   renderList();
   renderNotes(r.notes || []);
+  el.dlRow.hidden = false;
 }
 
 function paraHtml(text, issues){
@@ -1039,6 +1053,221 @@ document.addEventListener('click', function(e){
 
 window.addEventListener('scroll', function(){ el.tip.classList.remove('show'); }, true);
 window.addEventListener('resize', function(){ el.tip.classList.remove('show'); });
+
+/* ---------- скачивание отчёта ---------- */
+function pluralRu(n, one, few, many){
+  n = Math.abs(Number(n) || 0) % 100;
+  if (n >= 11 && n <= 19) return many;
+  n = n % 10;
+  if (n === 1) return one;
+  if (n >= 2 && n <= 4) return few;
+  return many;
+}
+
+function issueKindLabel(it){
+  var kind = it.kind || (it.severity === 'error' ? 'error' : 'flaw');
+  return kind === 'typo' ? 'опечатка' : kind === 'error' ? 'ошибка' : 'недочёт';
+}
+
+function issuePageMap(r){
+  var map = {};
+  var pages = (r.pages && r.pages.length) ? r.pages : [];
+  pages.forEach(function(ids, pi){
+    ids.forEach(function(id){ map[id] = pi + 1; });
+  });
+  return map;
+}
+
+function pad2(n){ return n < 10 ? '0' + n : String(n); }
+
+function nowStamp(){
+  var d = new Date();
+  return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear() +
+         ', ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+function profileLabel(id){
+  var list = state.profiles || [];
+  for (var i = 0; i < list.length; i++){
+    if (list[i].id === id) return list[i].label;
+  }
+  return id || '';
+}
+
+function engineLabel(r){
+  if (r.mode === 'ai') return 'нейросеть Groq' + (r.model ? ' · ' + r.model : '');
+  return 'локальный нормоконтроль';
+}
+
+function reportBaseName(r){
+  var name = String(r.file || 'диплом');
+  name = name.replace(/\.[^.]+$/, '');
+  name = name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'диплом';
+  return name + '-отчёт-проверки';
+}
+
+function buildReportText(r){
+  var pages = issuePageMap(r);
+  var L = [];
+  var line = function(s){ L.push(s === undefined ? '' : s); };
+
+  line('ДИПЛОМ-ЧЕК AI — ОТЧЁТ О ПРОВЕРКЕ');
+  line('==========================================');
+  line();
+  line('Документ: ' + (r.file || 'без имени'));
+  line('Проверено: ' + nowStamp());
+  line('Движок: ' + engineLabel(r));
+  var prof = profileLabel(r.profile);
+  if (prof) line('Профиль: ' + prof);
+  line();
+  line('ИТОГОВАЯ ОЦЕНКА: ' + (r.score == null ? '—' : r.score) + ' из 100');
+  var mark = (r.grade && r.grade.mark) || r.mark || '';
+  if (mark) line('Вердикт: ' + mark);
+  line('Ошибок: ' + (r.errors || 0) + ' · Недочётов: ' + (r.warnings || 0) +
+       (r.typos ? ' · в том числе опечаток: ' + r.typos : ''));
+  var st = r.stats || {};
+  if (st.paras || st.words){
+    line('Объём: ' + (st.paras || 0) + ' абз. · ' + (st.words || 0) + ' слов · ≈' +
+         (st.sheets || 0) + ' стр.');
+  }
+  line();
+  var comment = r.summary || (r.grade && r.grade.comment) || '';
+  if (comment){ line('КОММЕНТАРИЙ: ' + comment); line(); }
+
+  if (!r.issues.length){
+    line('ЗАМЕЧАНИЙ НЕ НАЙДЕНО — текст выглядит аккуратно.');
+    line();
+  }
+
+  var groups = [
+    {sev: 'error', title: 'ОШИБКИ'},
+    {sev: 'warning', title: 'НЕДОЧЁТЫ'}
+  ];
+
+  groups.forEach(function(g){
+    var list = r.issues.filter(function(it){ return it.severity === g.sev; });
+    if (!list.length) return;
+    line('=== ' + g.title + ' (' + list.length + ') ===');
+    line();
+    list.forEach(function(it){
+      var head = '[' + it.id + '] ' + issueKindLabel(it).toUpperCase();
+      if (it.category) head += ' · ' + it.category;
+      if (pages[it.para]) head += ' · страница ' + pages[it.para];
+      line(head);
+      if (it.title) line('    Название: ' + it.title);
+      var q = it.found || it.quote || '';
+      if (q) line('    Найдено: «' + q + '»');
+      if (it.should_be) line('    Правильно: «' + it.should_be + '»');
+      if (it.explanation) line('    Почему: ' + it.explanation);
+      if (it.suggestion) line('    Как исправить: ' + it.suggestion);
+      var src = it.source === 'ai' ? 'нейросеть Groq' : 'локальный нормоконтроль';
+      if (it.confidence != null && it.confidence !== ''){
+        src += ' · уверенность ' + Math.round(Number(it.confidence) * 100) + '%';
+      }
+      line('    Источник: ' + src);
+      line();
+    });
+  });
+
+  var chart = r.chart || [];
+  if (chart.length){
+    line('=== ПО КАТЕГОРИЯМ ===');
+    line();
+    chart.forEach(function(row){
+      line(row.name + ': ' + row.errors + ' ' + pluralRu(row.errors, 'ошибка', 'ошибки', 'ошибок') +
+           ', ' + row.warnings + ' ' + pluralRu(row.warnings, 'недочёт', 'недочёта', 'недочётов'));
+    });
+    line();
+  }
+
+  if (r.issues.length){
+    var perPage = {};
+    r.issues.forEach(function(it){
+      var p = pages[it.para] || 0;
+      if (!perPage[p]) perPage[p] = {e: 0, w: 0};
+      if (it.severity === 'error') perPage[p].e++; else perPage[p].w++;
+    });
+    line('=== ПО СТРАНИЦАМ ===');
+    line();
+    Object.keys(perPage).map(Number).sort(function(a, b){ return a - b; }).forEach(function(p){
+      line((p ? 'страница ' + p : 'без привязки к странице') + ' — ' +
+           perPage[p].e + ' ' + pluralRu(perPage[p].e, 'ошибка', 'ошибки', 'ошибок') + ', ' +
+           perPage[p].w + ' ' + pluralRu(perPage[p].w, 'недочёт', 'недочёта', 'недочётов'));
+    });
+    line();
+  }
+
+  if (r.notes && r.notes.length){
+    line('=== ПРИМЕЧАНИЯ ===');
+    line();
+    r.notes.forEach(function(n){ line('- ' + n); });
+    line();
+  }
+
+  line('Отчёт сформирован автоматически сервисом «Диплом-Чек AI».');
+  return L.join('\r\n');
+}
+
+function csvCell(v){
+  var s = (v == null ? '' : String(v));
+  s = s.replace(/\r?\n/g, ' ');
+  if (/[";]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function buildReportCsv(r){
+  var pages = issuePageMap(r);
+  var cols = ['№', 'Уровень', 'Тип', 'Категория', 'Страница', 'Абзац', 'Название',
+              'Найдено', 'Правильно', 'Объяснение', 'Как исправить',
+              'Источник', 'Уверенность'];
+  var rows = [cols.map(csvCell).join(';')];
+  r.issues.forEach(function(it){
+    rows.push([
+      it.id,
+      it.severity === 'error' ? 'ошибка' : 'недочёт',
+      issueKindLabel(it),
+      it.category || '',
+      pages[it.para] || '',
+      it.para != null ? it.para : '',
+      it.title || '',
+      it.found || it.quote || '',
+      it.should_be || '',
+      it.explanation || '',
+      it.suggestion || '',
+      it.source === 'ai' ? 'нейросеть Groq' : 'локальный нормоконтроль',
+      (it.confidence != null && it.confidence !== '') ? Math.round(Number(it.confidence) * 100) + '%' : ''
+    ].map(csvCell).join(';'));
+  });
+  return rows.join('\r\n');
+}
+
+function downloadFile(name, text, mime){
+  var blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){
+    URL.revokeObjectURL(url);
+    if (a.parentNode) a.parentNode.removeChild(a);
+  }, 1500);
+}
+
+el.dlTxt.addEventListener('click', function(){
+  var r = state.result;
+  if (!r) return;
+  downloadFile(reportBaseName(r) + '.txt', buildReportText(r), 'text/plain;charset=utf-8');
+});
+
+el.dlCsv.addEventListener('click', function(){
+  var r = state.result;
+  if (!r) return;
+  // BOM нужен, чтобы Excel открыл UTF-8 с кириллицей
+  downloadFile(reportBaseName(r) + '.csv', '\ufeff' + buildReportCsv(r), 'text/csv;charset=utf-8');
+});
 
 /* ---------- старт ---------- */
 loadHealth();
